@@ -1,5 +1,3 @@
-// change these to caps?
-
 var fs = require('fs');
 var path = require('path');
 var EventEmitter = require('events').EventEmitter;
@@ -74,6 +72,9 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             };
         },
 
+        // takes in a base directory
+        // looks at the mapping.manifest in it
+        // parses it into a map, and returns it
         mappingReader: function (base) {
             var file = base + "/mapping.manifest";
             var lines = fs.readFileSync(file, 'utf-8').split("\n");
@@ -92,6 +93,10 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             return o;
         },
 
+        // calls the callback on the result of the parsing the .xul file
+        // passed in as fileName
+        // the callback receives an array
+        // that has objects of the form {code: }
         getCodeFromXULFile: function(fileName, callback, contentMap) {
             var xp = new XULParser(fs.readFileSync(fileName, 'utf-8'), fileName, contentMap);
 
@@ -110,6 +115,8 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             xp.on("error", function(err) { console.log("Encountered the error: " + err); process.exit(-1); });
         },
 
+        // reads the ordering.manifest file
+        // this file has the order in which browser loads the .xul files
         manifestReader: function(fileName) {
             return fs.readFileSync(fileName, 'utf-8').
                 split("\n").
@@ -118,6 +125,11 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
                 });
         },
 
+        // gets the xul code from those files in allFiles
+        // that are not in visitedMap
+        // once it gets all such code, it uses the xulSync to signal "done"
+        // and sends an array of resultArrays
+        // (a resultArray is an array of objects having the "code" field)
         getOtherXULCode: function (visitedMap, allFiles, xulSync) {
             // find all those XULs that have not been visit, count them and visit them
             var unvisitedXULs = [];
@@ -138,6 +150,8 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             })
         },
 
+        // gets concatenated code from allFiles
+        // of all the .js(m) files that are not in visitedMap
         getOtherJSCode: function (visitedMap, allFiles) {
             var code = "";
             for (var iter = 0; iter < allFiles.length; ++ iter) {
@@ -148,6 +162,9 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             return code;
         },
 
+        // it goes through each element in arr, which is a resultArray,
+        // each resultArray is an array of objects with "code" fields
+        // the value of all "code" fields are concatenated
         concatCodeFields: function (arr) {
             var code = "";
             for (var elem = 0; elem < arr.length; ++elem) {
@@ -158,6 +175,9 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
             return code;
         },
 
+        // it concatenates the code fields in the resultArray
+        // the resultArray is obtained from the xa
+        // based on the ordering in ordering
         concatCodeFieldsInOrder: function (xa, ordering) {
             var code = "";
             for (var order = 0; order < ordering.length; ++order) {
@@ -171,34 +191,30 @@ var XULParser = require('./node_modules/xpi/lib/xulparser');
 };
 
     var root = Util.preprocess(process.argv[2]);
-
     var files = Util.getJXFilesFromBase(root);
 
     // perform initializations
     if (path.existsSync(root + "/mapping.manifest")) {
         Globals.contentMap = Util.mappingReader(root);
     }
-    Globals.orderedXULList = [];
 
+    Globals.orderedXULList = [];
     // if we were able to obtain an ordering.manifest
     // make use of that
     if (path.existsSync(root + "/ordering.manifest")) {
         Globals.orderedXULList = Util.manifestReader(root + "/ordering.manifest");
     }
 
-    // simplifiedManifestReader(root + "/ordering.manifest")
     Globals.jsvisit = new Globals.visitJS();
     Globals.xulvisit = new Globals.visitXUL(Globals.orderedXULList.length);
 
-    // start with the first orderedXULList, work your way through all of them
     Globals.XULResultArrays = {};
-//        Globals.otherXULArrays = [];
 
+    // synchronizer for collecting xul files
     function XULSynchonyzer() {
         EventEmitter.call(this);
     }
     XULSynchonyzer.prototype = Object.create(EventEmitter.prototype);
-
     var xulSync = new XULSynchonyzer();
 
     Globals.orderedXULList.forEach(function(xulFile) {
