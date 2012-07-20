@@ -106,9 +106,8 @@ function implicitHandlerFunction(src, filename, line, column) {
 // 1. { code: String } -- has the code contents
 // 2. { file: String } -- has the file name (in 3 forms)
 // Note: an error could also be emitted
-function XULParser(filename) {
+function XULParser(src, filename) {
     EventEmitter.call(this);
-    var src = fs.readFileSync(filename, 'utf-8');
     var parser = sax.parser(false, { lowercase: true, noscript: true });
     var self = this;
 
