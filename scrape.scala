@@ -9,6 +9,12 @@ object Helper {
   // constants
   val lineSep = "\r\n"
 
+  // mutable counters
+  var mFailedXULs = 0
+  var mFailedJS = 0
+  var mPassedXULs = 0
+  var mPassedJS = 0
+
   // replace chrome://packagename/content/uri with the content mapping
   // content packagename -> baseuri
   // to get baseuri/uri
@@ -101,9 +107,9 @@ object Helper {
         (acc, file) => {
           if (file.getPath.endsWith(".js") ||
               file.getPath.endsWith(".jsm"))
-            (acc._1 ++ List(file.getPath), acc._2)
+            (acc._1 ++ List(file.getCanonicalPath), acc._2)
           else if (file.getPath.endsWith(".xul"))
-            (acc._1, acc._2 ++ List(file.getPath))
+            (acc._1, acc._2 ++ List(file.getCanonicalPath))
           else if (file.isDirectory) {
             val (jsl, xull) = traverseDirectory(file.getPath)
             (acc._1 ++ jsl, acc._2 ++ xull)
@@ -115,17 +121,31 @@ object Helper {
     traverseDirectory(base)
   }
 
+  def getAllFilesWithSameEnding(lst: List[String], filename: String): List[String] = {
+    val ending = "/" + filename.split("/").last
+    lst.filter(_.endsWith(ending))
+  }
+
   // for the xulfile at filename, using the manifest results,
   // return the code as well as all the js files looked into
   def getXULCode(filename: String,
                  base: String,
+                 allJSFiles: List[String],
                  manifestResults: (Boolean, List[String], Map[String, String])): (String, List[String]) = {
+    
+    def getJSCodeInList(lst: List[String]): String = {
+      lst.foldLeft(lineSep)(
+        (acc, e) => acc + lineSep + getJSCode(e)
+      )
+    }
+
     // parse using xultojson.js
     val jxul: String = ("node xultojson.js " + filename).!!
-    // convert back from json
+    // convert to Scala data structures back from json
     JSON.parseFull(jxul) match {
         // the if is perhaps incorrect due to type erasure?
       case Some(x) if x.isInstanceOf[List[Map[String, String]]] => {
+        mPassedXULs += 1
         val lst = x.asInstanceOf[List[Map[String, String]]]
         lst.foldLeft((lineSep, List[String]()))(
           (acc: (String, List[String]), m: Map[String, String]) => {
@@ -137,14 +157,29 @@ object Helper {
               convertChromeURI(cleanedURI, base, manifestResults._3) match {
                 case Some(x) => {
                   val normalizedPath = (new File(x)).getCanonicalPath
-                  (acc._1 + lineSep + getJSCode(normalizedPath), acc._2 ++ List(normalizedPath))
+                  if (!new File(normalizedPath).exists()) {
+                    mFailedJS += 1
+                    val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
+                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
+
+                  } else {
+                    mPassedJS += 1
+                    (acc._1 + lineSep + getJSCode(normalizedPath), acc._2 ++ List(normalizedPath))
+                  }
                 }
                   // its the normal file, add base path to it
                 case None => {
                   // normalize this
                   val jsfile = filename.take(filename.lastIndexOf('/')) + "/" + cleanedURI
                   val normalizedPath = (new File(jsfile)).getCanonicalPath
-                  (acc._1 + lineSep + getJSCode(jsfile), acc._2 ++ List(normalizedPath))
+                  if (!new File(normalizedPath).exists()){
+                    mFailedJS += 1
+                    val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
+                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
+                  } else {
+                    mPassedJS += 1
+                    (acc._1 + lineSep + getJSCode(jsfile), acc._2 ++ List(normalizedPath))
+                  }
                 }
               }
             }
@@ -152,15 +187,21 @@ object Helper {
         )
       }
       // failed reading the xul file; move on by returning empty string
-      case _ => (lineSep, List[String]())
+      case _ => {
+        mFailedXULs += 1
+        (lineSep, List[String]())
+      }
     }
   }
   
   def getJSCode(filename: String): String = {
-    // TODO: handle failing cases in a resistant manner using getAllFilesWithName
     if (new File(filename).exists())
       io.Source.fromFile(filename).getLines.mkString(lineSep)
-    else lineSep
+    else {
+      mFailedJS += 1
+      println(filename)
+      lineSep
+    }
   }
 
   def getCodeFromXPIBase(base: String): String = {
@@ -174,10 +215,13 @@ object Helper {
     // 1
     val manifestInfo = manifestParser(base)
 
+    // 3
+    val (allJSFiles, allXFiles) = getJXFiles(base)
+
     def getXULCodeInList(lst: List[String]): (String, List[String]) = {
       lst.foldLeft((lineSep, List[String]()))(
         (acc: (String,  List[String]), e: String) => {
-          val (code, visitedFiles) = getXULCode(e, base, manifestInfo)
+          val (code, visitedFiles) = getXULCode(e, base, allJSFiles, manifestInfo)
           (acc._1 + lineSep + code, acc._2 ++ visitedFiles)
         }
       )
@@ -186,9 +230,6 @@ object Helper {
     // 2
     // TODO: XUL files can refer to other XUL files, handle them
     val (manifestXCode, manifestReachableJSFiles) = getXULCodeInList(manifestInfo._2)
-
-    // 3
-    val (allJSFiles, allXFiles) = getJXFiles(base)
 
     // 4
     val setOfVisitedXFiles = manifestInfo._2.toSet
@@ -201,9 +242,29 @@ object Helper {
         acc + lineSep + getJSCode(e)
       }
     )
-
+    // 6
     manifestXCode + lineSep + otherXCode + lineSep + otherJSCode + lineSep
   }
 }
 
-Helper.getCodeFromXPIBase(args(0))
+val dir = new File(args(0))
+assert(dir.isDirectory)
+
+//val file = new File(args(0))
+
+for (file <- dir.listFiles()) {
+  println(file.getCanonicalPath)
+  try {
+    Helper.getCodeFromXPIBase(file.getCanonicalPath)
+  } catch {
+    case e: java.lang.OutOfMemoryError => println("Ran out of memory")
+    case e => println(e.getLocalizedMessage)
+  }
+}
+
+
+println("Passed JS: " + Helper.mPassedJS)
+println("Passed XUL: " + Helper.mPassedXULs)
+println("Failed JS: " + Helper.mFailedJS)
+println("Failes XUL: " + Helper.mFailedXULs)
+
