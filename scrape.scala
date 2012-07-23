@@ -9,12 +9,6 @@ object Helper {
   // constants
   val lineSep = "\r\n"
 
-  // mutable counters
-  var mFailedXULs = 0
-  var mFailedJS = 0
-  var mPassedXULs = 0
-  var mPassedJS = 0
-
   // replace chrome://packagename/content/uri with the content mapping
   // content packagename -> baseuri
   // to get baseuri/uri
@@ -145,7 +139,6 @@ object Helper {
     JSON.parseFull(jxul) match {
         // the if is perhaps incorrect due to type erasure?
       case Some(x) if x.isInstanceOf[List[Map[String, String]]] => {
-        mPassedXULs += 1
         val lst = x.asInstanceOf[List[Map[String, String]]]
         lst.foldLeft((lineSep, List[String]()))(
           (acc: (String, List[String]), m: Map[String, String]) => {
@@ -158,12 +151,10 @@ object Helper {
                 case Some(x) => {
                   val normalizedPath = (new File(x)).getCanonicalPath
                   if (!new File(normalizedPath).exists()) {
-                    mFailedJS += 1
                     val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
                     (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
 
                   } else {
-                    mPassedJS += 1
                     (acc._1 + lineSep + getJSCode(normalizedPath), acc._2 ++ List(normalizedPath))
                   }
                 }
@@ -173,11 +164,9 @@ object Helper {
                   val jsfile = filename.take(filename.lastIndexOf('/')) + "/" + cleanedURI
                   val normalizedPath = (new File(jsfile)).getCanonicalPath
                   if (!new File(normalizedPath).exists()){
-                    mFailedJS += 1
                     val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
                     (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
                   } else {
-                    mPassedJS += 1
                     (acc._1 + lineSep + getJSCode(jsfile), acc._2 ++ List(normalizedPath))
                   }
                 }
@@ -188,7 +177,6 @@ object Helper {
       }
       // failed reading the xul file; move on by returning empty string
       case _ => {
-        mFailedXULs += 1
         (lineSep, List[String]())
       }
     }
@@ -198,7 +186,6 @@ object Helper {
     if (new File(filename).exists())
       io.Source.fromFile(filename).getLines.mkString(lineSep)
     else {
-      mFailedJS += 1
       println(filename)
       lineSep
     }
@@ -245,26 +232,41 @@ object Helper {
     // 6
     manifestXCode + lineSep + otherXCode + lineSep + otherJSCode + lineSep
   }
-}
 
-val dir = new File(args(0))
-assert(dir.isDirectory)
+  // assumption: root dir of xpis, target dir for files to be created
+  def scrapeAllInDirToTarget(dirName: String, targetDirName: String) {
+    val dir = new File(dirName)
+    assert(dir.isDirectory)
 
-//val file = new File(args(0))
+    val targetDir = new File(targetDirName)
+    assert(targetDir.isDirectory)
 
-for (file <- dir.listFiles()) {
-  println(file.getCanonicalPath)
-  try {
-    Helper.getCodeFromXPIBase(file.getCanonicalPath)
-  } catch {
-    case e: java.lang.OutOfMemoryError => println("Ran out of memory")
-    case e => println(e.getLocalizedMessage)
+    for (file <- dir.listFiles()) {
+      stdout.println(file.getPath)
+      try {
+        val code = Helper.getCodeFromXPIBase(file.getCanonicalPath)
+        var outStream = new PrintStream(
+          new FileOutputStream(
+            targetDir.getCanonicalPath + "/" + file.getCanonicalPath.split("/").last + ".js"))
+        outStream.print(code)
+        outStream.close
+      } catch {
+        case e: java.lang.OutOfMemoryError => stderr.println("Ran out of memory")
+        case e => stderr.println(e.getLocalizedMessage)
+      }
+    }
+  }
+
+  def scrapeXPI(base: String) {
+    val file = new File(base)
+    try {
+      val code = Helper.getCodeFromXPIBase(file.getCanonicalPath)
+      print(code)
+    } catch {
+      case e: java.lang.OutOfMemoryError => stderr.println("Ran out of memory")
+      case e => stderr.println(e.getLocalizedMessage)
+    }
   }
 }
 
-
-println("Passed JS: " + Helper.mPassedJS)
-println("Passed XUL: " + Helper.mPassedXULs)
-println("Failed JS: " + Helper.mFailedJS)
-println("Failes XUL: " + Helper.mFailedXULs)
-
+Helper.scrapeXPI(args(0))
