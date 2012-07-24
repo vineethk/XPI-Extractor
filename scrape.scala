@@ -9,6 +9,10 @@ object Helper {
   // constants
   val lineSep = "\r\n"
 
+  def vineeth(str: String) {
+    println(str)
+  }
+
   // replace chrome://packagename/content/uri with the content mapping
   // content packagename -> baseuri
   // to get baseuri/uri
@@ -125,10 +129,11 @@ object Helper {
   def getXULCode(filename: String,
                  base: String,
                  allJSFiles: List[String],
+                 excludeJSFiles: List[String],
                  manifestResults: (Boolean, List[String], Map[String, String])): (String, List[String]) = {
     
-    def getJSCodeInList(lst: List[String]): String = {
-      lst.foldLeft(lineSep)(
+    def getJSCodeInList(lst: List[String], seen: List[String]): String = {
+      lst.distinct.filterNot(seen.contains(_)).foldLeft(lineSep)(
         (acc, e) => acc + lineSep + getJSCode(e)
       )
     }
@@ -152,10 +157,10 @@ object Helper {
                   val normalizedPath = (new File(x)).getCanonicalPath
                   if (!new File(normalizedPath).exists()) {
                     val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
-                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
+                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements, acc._2 ++ excludeJSFiles), acc._2 ++ possibleReplacements)
 
                   } else {
-                    (acc._1 + lineSep + getJSCode(normalizedPath), acc._2 ++ List(normalizedPath))
+                    (acc._1 + lineSep + getJSCode(normalizedPath, acc._2 ++ excludeJSFiles), acc._2 ++ List(normalizedPath))
                   }
                 }
                   // its the normal file, add base path to it
@@ -165,9 +170,9 @@ object Helper {
                   val normalizedPath = (new File(jsfile)).getCanonicalPath
                   if (!new File(normalizedPath).exists()){
                     val possibleReplacements = getAllFilesWithSameEnding(allJSFiles, normalizedPath)
-                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements), acc._2 ++ possibleReplacements)
+                    (acc._1 + lineSep + getJSCodeInList(possibleReplacements, acc._2 ++ excludeJSFiles), acc._2 ++ possibleReplacements)
                   } else {
-                    (acc._1 + lineSep + getJSCode(jsfile), acc._2 ++ List(normalizedPath))
+                    (acc._1 + lineSep + getJSCode(jsfile, acc._2 ++ excludeJSFiles), acc._2 ++ List(normalizedPath))
                   }
                 }
               }
@@ -182,11 +187,10 @@ object Helper {
     }
   }
   
-  def getJSCode(filename: String): String = {
-    if (new File(filename).exists())
+  def getJSCode(filename: String, ifnotin: List[String] = List[String]()): String = {
+    if ((!ifnotin.contains(filename)) && new File(filename).exists())
       io.Source.fromFile(filename).getLines.mkString(lineSep)
     else {
-      println(filename)
       lineSep
     }
   }
@@ -205,10 +209,10 @@ object Helper {
     // 3
     val (allJSFiles, allXFiles) = getJXFiles(base)
 
-    def getXULCodeInList(lst: List[String]): (String, List[String]) = {
+    def getXULCodeInList(lst: List[String], excludeJSFiles: List[String]): (String, List[String]) = {
       lst.foldLeft((lineSep, List[String]()))(
         (acc: (String,  List[String]), e: String) => {
-          val (code, visitedFiles) = getXULCode(e, base, allJSFiles, manifestInfo)
+          val (code, visitedFiles) = getXULCode(e, base, allJSFiles, acc._2 ++ excludeJSFiles, manifestInfo)
           (acc._1 + lineSep + code, acc._2 ++ visitedFiles)
         }
       )
@@ -216,11 +220,11 @@ object Helper {
 
     // 2
     // TODO: XUL files can refer to other XUL files, handle them
-    val (manifestXCode, manifestReachableJSFiles) = getXULCodeInList(manifestInfo._2)
+    val (manifestXCode, manifestReachableJSFiles) = getXULCodeInList(manifestInfo._2, List[String]())
 
     // 4
     val setOfVisitedXFiles = manifestInfo._2.toSet
-    val (otherXCode, otherReachableJSFiles) = getXULCodeInList(allXFiles.filterNot(setOfVisitedXFiles.contains(_)))
+    val (otherXCode, otherReachableJSFiles) = getXULCodeInList(allXFiles.filterNot(setOfVisitedXFiles.contains(_)), manifestReachableJSFiles)
 
     // 5
     val setOfVisitedJSFiles = manifestReachableJSFiles.toSet ++ otherReachableJSFiles.toSet
@@ -229,6 +233,7 @@ object Helper {
         acc + lineSep + getJSCode(e)
       }
     )
+    
     // 6
     manifestXCode + lineSep + otherXCode + lineSep + otherJSCode + lineSep
   }
