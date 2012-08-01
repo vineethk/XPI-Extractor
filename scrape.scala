@@ -250,7 +250,7 @@ object Helper {
       stdout.println(file.getPath)
       try {
         val code = Helper.getCodeFromXPIBase(file.getCanonicalPath)
-        var outStream = new PrintStream(
+        val outStream = new PrintStream(
           new FileOutputStream(
             targetDir.getCanonicalPath + "/" + file.getCanonicalPath.split("/").last + ".js"))
         outStream.print(code)
@@ -272,6 +272,35 @@ object Helper {
       case e => stderr.println(e.getLocalizedMessage)
     }
   }
+
+  def printErrorAndExit(str: String) {
+    stderr.println(str);
+    sys.exit(-1);
+  }
+
+  def unzipAndScrapeXPI(xpi: String) {
+    if (!xpi.endsWith(".xpi"))
+      printErrorAndExit("Please provide a .xpi file")
+    val targDir = xpi.split("""/""").last.dropRight(4)
+    if (new File(targDir).exists)
+      printErrorAndExit("Cannot extract, file name already exists")  
+    else {
+      // 1. extract into targDir
+      ("python unbundle.py " + xpi + " " + targDir) !; 
+      // 2. if we fail extrating, a failed file would be created
+      if (new File(targDir + "/" + "failed").exists)
+        printErrorAndExit("Error while extracting");
+      // 3. use the extraction to scrape
+      val code = Helper.getCodeFromXPIBase(targDir) 
+      // 4. delete the extractions
+      ("rm -r " + targDir) !;
+      val outStream = new PrintStream(new FileOutputStream(targDir + ".js"))
+      outStream.print(code)
+      outStream.close
+    }
+  }
 }
 
-Helper.scrapeXPI(args(0))
+// Helper.scrapeAllInDirToTarget(args(0), args(1))
+// Helper.scrapeXPI(args(0))
+Helper.unzipAndScrapeXPI(args(0))
