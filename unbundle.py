@@ -1,3 +1,5 @@
+# this file is taken from Matt Basta's code
+# https://github.com/mattbasta/amo-validator/blob/master/extras/unbundle.py
 import sys
 import os
 
